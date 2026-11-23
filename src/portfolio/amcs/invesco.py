@@ -6,12 +6,12 @@ from ..parse import find_header, parse_sheet, text, workbooks
 
 AMC = "Invesco Mutual Fund"
 SLUG = "invesco"
-IMPERSONATE = "chrome"
 API = "https://www.invescomutualfund.com/api"
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
 def list_disclosures(session):
+    session.headers["Accept"] = "application/json"
     classes = session.get(f"{API}/ClassificationCompleteMonthlyHoldings", timeout=60).json()
     classes = [c["FunClassificationValue"] for c in classes if c["FunClassificationValue"] != "Select"]
     years = [r["Year"] for r in session.get(f"{API}/CompleteMonthlyHoldings?year=0", timeout=60).json()]
