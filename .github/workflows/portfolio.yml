@@ -141,12 +141,18 @@ jobs:
         pattern: manifest-*
         path: portfolio/manifest
         merge-multiple: true
-    - uses: stefanzweifel/git-auto-commit-action@d0b01107b5db882071f96de5dd4b54961ea93f4c # v7.2.1
+    - name: Commit manifests
       id: commit
-      with:
-        commit_message: Update portfolio manifests
-        file_pattern: portfolio/manifest/*.csv
-        commit_author: 'github-actions[bot] <github-actions[bot]@users.noreply.github.com>'
+      run: |
+        git config user.name 'github-actions[bot]'
+        git config user.email 'github-actions[bot]@users.noreply.github.com'
+        git add portfolio/manifest
+        if git diff --cached --quiet; then echo "changes_detected=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+        git commit -m "Update portfolio manifests"
+        # main may have moved while the fetch jobs ran
+        git pull --rebase origin "$GITHUB_REF_NAME"
+        git push origin "HEAD:$GITHUB_REF_NAME"
+        echo "changes_detected=true" >> "$GITHUB_OUTPUT"
     - run: pipx install uv
       if: ${{ steps.commit.outputs.changes_detected == 'true' || inputs.reparse }}
     - name: Build and release SQLite dataset
