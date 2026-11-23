@@ -5,6 +5,7 @@ import re
 import time
 
 from ..base import Disclosure, parse_date
+from ..parse import parse_file
 
 AMC = "Jio BlackRock Mutual Fund"
 SLUG = "jioblackrock"
@@ -61,9 +62,15 @@ def list_disclosures(session):
     for url, it in items.items():
         by_period.setdefault(period_of(it), []).append((url, it))
     for period, rows in by_period.items():
-        # The consolidated "Mutual Fund" workbook replaces the per-scheme files
         cons = [r for r in rows if re.search(r"mutual[\s-]fund-?\s*monthly", r[1]["title"], re.I)]
         for url, it in cons or rows:
             scheme = "" if cons else re.sub(r"(?i)[\s-]*monthly[\s-]*portfolio.*$", "", it["title"])
             name = f"{it['uid'] or 'portfolio'}-{period}{it['file']['ext']}"
             yield Disclosure(amc=SLUG, period=period, url=url, filename=name, scheme=scheme)
+
+
+HEADING = re.compile(r"^(debt instruments|money market instruments|equity( &| and)? equity related)$", re.I)
+
+
+def parse(path, amc="", period=""):
+    return [h for h in parse_file(path, amc=amc, period=period) if h.isin or not HEADING.match(h.name.strip())]

@@ -1,4 +1,7 @@
+import re
+
 from ..base import Disclosure, parse_period
+from ..parse import parse_file
 
 AMC = "AlphaGrep Mutual Fund"
 SLUG = "alphagrep"
@@ -22,3 +25,8 @@ def list_disclosures(session):
             if period:
                 name = f"{(item.get('scheme') or {}).get('slug', 'scheme')}_{period}{f.get('ext') or '.xls'}"
                 yield Disclosure(amc=SLUG, period=period, url=CMS + f["url"], scheme=scheme, filename=name)
+
+
+def parse(path, amc="", period=""):
+    # "Gross Total (A)+(B)" rows are not caught by the shared total filter
+    return [h for h in parse_file(path, amc=amc, period=period) if not re.match(r"gross\s+total", h.name, re.I)]

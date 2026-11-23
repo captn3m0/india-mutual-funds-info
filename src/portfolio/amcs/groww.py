@@ -2,6 +2,7 @@ import json
 import re
 
 from ..base import Disclosure, parse_period
+from ..parse import END_RE, SUBSECTION_RE, TOTAL_RE, find_header, map_columns, text
 
 AMC = "Groww Mutual Fund"
 SLUG = "groww"
@@ -35,20 +36,47 @@ def list_disclosures(session):
 
 
 def parse(path, amc="", period=""):
-    from collections import defaultdict
+    from ..parse import parse_sheet, workbooks
 
-    from ..parse import parse_file
+    out = []
+    for member, wb in workbooks(path):
+        source = path.rsplit("/", 1)[-1] + (f"!{member}" if member else "")
+        for sheet in wb.sheet_names:
+            rows = wb.get_sheet_by_name(sheet).to_python(skip_empty_area=False)
+            fix(rows)
+            out.extend(parse_sheet(rows, sheet, amc=amc, period=period, source=source))
+    return out
 
-    rows = parse_file(path, amc=amc, period=period)
-    groups = defaultdict(list)
-    for h in rows:
-        if "deriv" not in h.section.lower():
-            groups[(h.source, h.sheet)].append(h)
-    # Percent cells are fractions of 1 except in the derivatives block, which defeats the generic rescale
-    for hs in groups.values():
-        pcts = [h.pct_nav for h in hs if h.pct_nav is not None]
-        if pcts and abs(sum(pcts)) <= 1.5:
-            for h in hs:
-                if h.pct_nav is not None:
-                    h.pct_nav = round(h.pct_nav * 100, 6)
-    return rows
+
+def fix(rows):
+    # Percent cells are fractions of 1 except sometimes in the derivatives block, which defeats the generic rescale
+    hi = find_header(rows)
+    if hi is None:
+        return
+    cols = map_columns(rows, hi)[0]
+    nj, pj = cols.get("name", max(cols["isin"] - 1, 0)), cols.get("pct_nav")
+    if pj is None:
+        return
+    main, der, body, in_d = [], [], [], False
+    for r in rows[hi + 1:]:
+        name = text(r[nj]) if nj < len(r) else ""
+        v = r[pj] if pj < len(r) else None
+        if not isinstance(v, float):
+            if name and v in ("", None) and not SUBSECTION_RE.match(name):
+                in_d = bool(re.search(r"deriv|futur", name, re.I))
+            continue
+        if END_RE.match(name):
+            break
+        if TOTAL_RE.match(name):
+            continue
+        (der if in_d else main).append(v)
+        body.append((r, in_d))
+    if not main:
+        return
+    m, d = sum(main), sum(der)
+    da, db = abs(m + d - 1), abs(m + d / 100 - 1)
+    if min(da, db) > 0.06:
+        return
+    for r, in_d in body:
+        if da <= db or not in_d:
+            r[pj] = r[pj] * 100

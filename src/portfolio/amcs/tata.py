@@ -3,7 +3,7 @@ from urllib.parse import unquote
 import re
 
 from ..base import MONTHS, Disclosure, is_sheet
-from ..parse import find_header, parse_sheet, text, workbooks
+from ..parse import find_header, parse_sheet, text, unhedge, workbooks
 
 AMC = "Tata Mutual Fund"
 SLUG = "tata"
@@ -34,6 +34,28 @@ ASON = re.compile(r"as on\s+(\d\d)[/.-](\d\d)[/.-](\d{4}|\d\d)", re.I)
 STOP = re.compile(r"^(net assets|details of|disclosure of|name of the schemes?)\b", re.I)
 
 
+FMP = re.compile(r"(SERIES)\s*\d+\s*(SCHEME)\s*-\s*[A-Z]\b", re.I)
+
+
+def fix_fmp(scheme, sheet):
+    m = re.fullmatch(r"TFM(\d+)([A-Z])", sheet)
+    return FMP.sub(rf"\1 {m.group(1)} \2 - {m.group(2)}", scheme, count=1) if m and FMP.search(scheme) else scheme
+
+
+def drop_subtotals(hs):
+    keep = []
+    for h in hs:
+        acc, hit = 0.0, False
+        for k, p in enumerate(reversed(keep), 1):
+            if p.sheet != h.sheet or p.isin or p.pct_nav is None:
+                break
+            acc += p.pct_nav
+            hit = hit or ((k >= 2 or re.search(r"deposits?$", h.name, re.I)) and not h.isin and h.pct_nav and abs(acc - h.pct_nav) <= 0.005 * abs(acc))
+        if not hit:
+            keep.append(h)
+    return keep
+
+
 def parse(path, amc="", period=""):
     out = []
     for member, wb in workbooks(path):
@@ -53,11 +75,16 @@ def parse(path, amc="", period=""):
                         as_on = f"{2000 + int(y) if len(y) == 2 else y}-{m.group(2)}-{m.group(1)}"
                     if not scheme and t and t.lower() != "index" and rows.index(r) < 3:
                         scheme = t
-            rows[hi] = [re.sub(r"mkt val", "market value", re.sub(r"yield.*", "ytm", text(c), flags=re.I), flags=re.I) for c in rows[hi]]
+            for j in range(hi, min(hi + 4, len(rows))):
+                if any(re.match(r"yield", text(c), re.I) for c in rows[j]):
+                    rows[j] = [re.sub(r"mkt val", "market value", re.sub(r"yield.*", "ytm", text(c), flags=re.I), flags=re.I) for c in rows[j]]
             end = next((i for i, r in enumerate(rows[hi + 1:], hi + 1) if STOP.match(text(r[0]) if r else "")), len(rows))
             for h in parse_sheet(rows[:end], sheet, amc=amc, period=period, source=source):
-                if re.search(r"\btotal\b", h.name, re.I) or h.name == "EQUITY RELATED":
+                if not h.isin and (re.search(r"\btotal\b", h.name, re.I) or h.name == "EQUITY RELATED" or h.name.upper() == h.section.upper()):
                     continue
-                h.scheme, h.as_on = scheme or h.scheme, as_on or h.as_on
+                h.scheme, h.as_on = fix_fmp(scheme or h.scheme, sheet), as_on or h.as_on
                 out.append(h)
-    return out
+    sheets = {}
+    for h in drop_subtotals(out):
+        sheets.setdefault((h.source, h.sheet), []).append(h)
+    return [h for hs in sheets.values() for h in unhedge(hs)]

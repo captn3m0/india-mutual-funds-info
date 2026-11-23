@@ -28,6 +28,7 @@ COLUMNS = {
 TOTAL_RE = re.compile(r"^(sub[\s_-]*totals?|totals?|grand[\s_]total|net assets?|net asset value)\b", re.I)
 END_RE = re.compile(r"^(grand[\s_]total|net assets?|total net assets?|total aum)\b", re.I)
 SUBSECTION_RE = re.compile(r"^\(?([a-z]|[ivx]{1,4}|\d{1,2})[).]\s", re.I)
+FUT_RE = re.compile(r"\bfut|\bfutures?\b|\bderivat|#$", re.I)
 SCHEME_HINT = re.compile(r"fund|scheme|etf|plan|index|fof|yojana|bees", re.I)
 
 
@@ -212,7 +213,23 @@ def parse_sheet(rows, sheet_name, **common):
         for h in out:
             if h.pct_nav is not None:
                 h.pct_nav = round(h.pct_nav * 100, 6)
-    return out
+    return unhedge(out)
+
+
+def is_future(h):
+    if FUT_RE.search(f"{h.section} {h.subsection} {h.name} {h.industry_rating}"):
+        return not re.search(r"margin", h.name, re.I)
+    return (h.quantity or 0) < 0 and (h.pct_nav or 0) < 0
+
+
+def unhedge(hs):
+    """Blank futures weights where the sheet's own total leaves them out."""
+    futs = [h for h in hs if is_future(h) and h.pct_nav is not None]
+    total = sum(h.pct_nav or 0 for h in hs)
+    if futs and not 95 <= total <= 105 and 95 <= total - sum(h.pct_nav for h in futs) <= 105:
+        for h in futs:
+            h.pct_nav = None
+    return hs
 
 
 def parse_file(path: str, amc: str = "", period: str = "") -> list[Holding]:
