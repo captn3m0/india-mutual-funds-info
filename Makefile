@@ -15,3 +15,7 @@ amfi_funds.csv:
 
 requirements.txt:
 	uv pip compile pyproject.toml
+# make portfolio AMC=ppfas PERIODS=1 fetches and checks a local sample
+portfolio:
+	PYTHONPATH=src uv run python -m portfolio fetch $(AMC) --periods $(or $(PERIODS),1) --no-manifest
+	PYTHONPATH=src uv run python -m portfolio parse $(AMC) --check

@@ -1,0 +1,135 @@
+name: Portfolio Disclosures
+on:
+  schedule:
+    # 07:00 IST daily; AMCs publish month-end portfolios by the 10th
+    - cron: '30 1 * * *'
+  workflow_dispatch:
+    inputs:
+      amc:
+        description: AMC slugs, space separated (default is all)
+        required: false
+      since:
+        description: Earliest period to fetch, YYYY-MM
+        required: false
+permissions: {}
+concurrency:
+  group: portfolio
+  cancel-in-progress: false
+env:
+  PYTHONPATH: src
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      slugs: ${{ steps.slugs.outputs.slugs }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - run: pipx install uv
+    - name: List AMCs
+      id: slugs
+      env:
+        AMC: ${{ inputs.amc }}
+      run: |
+        all=$(uv run python -m portfolio amcs | cut -f1)
+        picked=$(for s in ${AMC:-$all}; do grep -Fx -- "$s" <<< "$all" || echo "::warning::unknown AMC $s" >&2; done)
+        echo "slugs=$(jq -Rnc '[inputs | select(length > 0)]' <<< "$picked")" >> "$GITHUB_OUTPUT"
+    - name: Ensure holdings release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh release view holdings > /dev/null 2>&1 || gh release create holdings --latest=false \
+          --title "Parsed holdings" --notes "Rolling per-AMC holdings CSVs. See README."
+  fetch:
+    name: Fetch ${{ matrix.slug }}
+    needs: plan
+    if: ${{ needs.plan.outputs.slugs != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        slug: ${{ fromJSON(needs.plan.outputs.slugs) }}
+    env:
+      SLUG: ${{ matrix.slug }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - run: pipx install uv
+    - name: Download new disclosures
+      env:
+        SINCE: ${{ inputs.since }}
+      run: uv run python -m portfolio fetch "$SLUG" ${SINCE:+--since "$SINCE"} || echo "::warning::some $SLUG downloads failed"
+    - name: Check for new files
+      id: new
+      run: echo "found=$([ -d "raw/$SLUG" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+    - name: Parse holdings
+      if: ${{ steps.new.outputs.found == 'true' }}
+      run: uv run python -m portfolio parse "$SLUG"
+    - name: Archive raw files
+      if: ${{ steps.new.outputs.found == 'true' }}
+      run: |
+        gh release view "raw-$SLUG" > /dev/null 2>&1 || gh release create "raw-$SLUG" --latest=false \
+          --title "Raw disclosures: $SLUG" --notes "Unmodified monthly portfolio files as published by the AMC, one tar per period."
+        mkdir -p "$RUNNER_TEMP/tars"
+        for dir in "raw/$SLUG"/*/; do
+          period=$(basename "$dir")
+          tar -C "raw/$SLUG" -cf "$RUNNER_TEMP/tars/$SLUG-$period.tar" "$period"
+        done
+        find "$RUNNER_TEMP/tars" -name '*.tar' -print0 | xargs -0 -n 20 gh release upload "raw-$SLUG" --clobber
+    - name: Publish holdings
+      if: ${{ steps.new.outputs.found == 'true' }}
+      run: |
+        cd "$RUNNER_TEMP"
+        gh release download holdings --repo "$GITHUB_REPOSITORY" --pattern "$SLUG.csv.zst" || true
+        (cd "$GITHUB_WORKSPACE" && uv run python -m portfolio.build merge "$SLUG" "$RUNNER_TEMP/$SLUG.csv.zst" "$RUNNER_TEMP/$SLUG.csv")
+        zstd -f -10 -T0 "$SLUG.csv"
+        gh release upload holdings --repo "$GITHUB_REPOSITORY" "$SLUG.csv.zst" --clobber
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      if: ${{ steps.new.outputs.found == 'true' }}
+      with:
+        name: manifest-${{ matrix.slug }}
+        path: portfolio/manifest/${{ matrix.slug }}.csv
+  publish:
+    name: Publish dataset
+    needs: fetch
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        pattern: manifest-*
+        path: portfolio/manifest
+        merge-multiple: true
+    - uses: stefanzweifel/git-auto-commit-action@d0b01107b5db882071f96de5dd4b54961ea93f4c # v7.2.1
+      id: commit
+      with:
+        commit_message: Update portfolio manifests
+        file_pattern: portfolio/manifest/*.csv
+        commit_author: 'github-actions[bot] <github-actions[bot]@users.noreply.github.com>'
+    - run: pipx install uv
+      if: ${{ steps.commit.outputs.changes_detected == 'true' }}
+    - name: Build and release SQLite dataset
+      if: ${{ steps.commit.outputs.changes_detected == 'true' }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        mkdir -p "$RUNNER_TEMP/holdings"
+        gh release download holdings --dir "$RUNNER_TEMP/holdings" --pattern '*.csv.zst'
+        uv run python -m portfolio.build db portfolio.db "$RUNNER_TEMP"/holdings/*.csv.zst
+        zstd -10 -T0 portfolio.db
+        version="v$(TZ=Asia/Kolkata date +%Y.%m.%d)"
+        gh release delete "$version" --yes --cleanup-tag > /dev/null 2>&1 || true
+        gh release create "$version" --notes "Mutual fund portfolio holdings as of $version. See README for the schema." portfolio.db.zst

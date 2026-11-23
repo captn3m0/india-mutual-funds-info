@@ -1,3 +1,6 @@
+raw/
+portfolio/holdings/
+__pycache__/
 *.xlsx
 uv.lock
 # These are Excel-XML files
