@@ -25,8 +25,8 @@ COLUMNS = {
     "pct_nav": r"%|percent",
     "ytm": r"yield|ytm|ytc",
 }
-TOTAL_RE = re.compile(r"^(sub[\s_-]?total|total|grand[\s_]total|net assets|net asset value)\b", re.I)
-END_RE = re.compile(r"^(grand[\s_]total|net assets|total net assets|total aum)\b", re.I)
+TOTAL_RE = re.compile(r"^(sub[\s_-]*totals?|totals?|grand[\s_]total|net assets?|net asset value)\b", re.I)
+END_RE = re.compile(r"^(grand[\s_]total|net assets?|total net assets?|total aum)\b", re.I)
 SUBSECTION_RE = re.compile(r"^\(?([a-z]|[ivx]{1,4}|\d{1,2})[).]\s", re.I)
 SCHEME_HINT = re.compile(r"fund|scheme|etf|plan|index|fof|yojana|bees", re.I)
 
@@ -87,7 +87,11 @@ def workbooks(path: str):
         with zipfile.ZipFile(io.BytesIO(blob)) as z:
             for n in z.namelist():
                 if n.lower().endswith(SHEET_EXT) and not n.split("/")[-1].startswith("~"):
-                    yield n, CalamineWorkbook.from_filelike(io.BytesIO(z.read(n)))
+                    try:
+                        wb = CalamineWorkbook.from_filelike(io.BytesIO(z.read(n)))
+                    except Exception:
+                        continue
+                    yield n, wb
     else:
         yield "", CalamineWorkbook.from_filelike(io.BytesIO(blob))
 
@@ -150,12 +154,13 @@ def find_meta(rows, hi, sheet_name):
             m = re.match(r"(?:scheme name|name of the scheme|scheme)\s*[:\-]\s*(.*)", t, re.I)
             if m and not scheme:
                 scheme = m.group(1).strip() or (text(cells[k + 1]) if k + 1 < len(cells) else "")
-            elif SCHEME_HINT.search(t) and not re.search(r"mutual fund$|^portfolio|back to", t, re.I):
+            elif SCHEME_HINT.search(t) and not re.search(r"mutual fund$|^portfolio|back to|pursuant to|regulation", t, re.I):
                 candidates.append(t)
     if not scheme and candidates:
         scheme = candidates[0]
     scheme = re.sub(r"^(monthly )?portfolio (statement )?(of|for)\s+", "", scheme, flags=re.I)
-    return scheme or sheet_name, as_on
+    scheme = re.sub(r"\s*[-(,]?\s*(as o[nf]|as at|for (the month of )?[a-z]+,? 20\d\d)\b.*$", "", scheme, flags=re.I)
+    return scheme.strip() or sheet_name, as_on
 
 
 def parse_sheet(rows, sheet_name, **common):
@@ -174,6 +179,9 @@ def parse_sheet(rows, sheet_name, **common):
 
     for row in rows[hi + 1:]:
         name = text(cell(row, "name"))
+        if not name and not ISIN_RE.match(text(cell(row, "isin")).upper()):
+            # Section and cash labels often sit in the ISIN column instead
+            name = text(cell(row, "isin"))
         if not name:
             continue
         value, pct = num(cell(row, "market_value")), num(cell(row, "pct_nav"))

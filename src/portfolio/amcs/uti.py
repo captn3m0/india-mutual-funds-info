@@ -2,7 +2,7 @@ import re
 import time
 
 from ..base import MONTHS, Disclosure
-from ..parse import parse_sheet, text, workbooks
+from ..parse import find_header, parse_sheet, text, workbooks
 
 AMC = "UTI Mutual Fund"
 SLUG = "uti"
@@ -65,7 +65,7 @@ def parse(path, amc="", period=""):
     out = []
     for member, wb in workbooks(path):
         base = member.rsplit("/", 1)[-1]
-        if member and not re.search(r"expos", base, re.I) or re.match(r"(fut|div)", base, re.I):
+        if re.match(r"(fut|div|deriv)", base, re.I):
             continue
         rows = []
         for sheet in wb.sheet_names:
@@ -73,6 +73,7 @@ def parse(path, amc="", period=""):
         # One long sheet holds every scheme; each block starts at its SCHEME: line
         starts = [i for i, r in enumerate(rows) if r and re.match(r"scheme\s*:", text(r[0]), re.I)]
         source = path.rsplit("/", 1)[-1] + (f"!{member}" if member else "")
+        head = find_header(rows)
         for a, b in zip(starts, starts[1:] + [len(rows)]):
             name = re.sub(r"^scheme\s*:\s*", "", text(rows[a][0]), flags=re.I)
             block = rows[a:b]
@@ -80,5 +81,7 @@ def parse(path, amc="", period=""):
                 if r and re.match(r"name of the security", text(r[0]), re.I):
                     block = block[:k]
                     break
+            if find_header(block) is None and head is not None:
+                block = [block[0], rows[head]] + block[1:]
             out += parse_sheet(block, name or "scheme", amc=amc, period=period, source=source)
     return out

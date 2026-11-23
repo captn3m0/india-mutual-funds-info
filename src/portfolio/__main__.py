@@ -42,7 +42,7 @@ def download(s, d):
     r = s.request(d.method, d.url, headers=d.headers, data=d.data, timeout=180)
     r.raise_for_status()
     body = r.content
-    if len(body) < 512 or body[:1] == b"<" and b"<html" in body[:2048].lower():
+    if len(body) < 512 or body.lstrip()[:1] == b"<" and b"<html" in body[:2048].lower():
         raise ValueError(f"not a spreadsheet ({len(body)} bytes)")
     path = raw_path(d)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -106,6 +106,15 @@ def raw_files(slug):
                 yield period, f"{pdir}/{name}"
 
 
+def dedupe(rows):
+    """Keep one source file per scheme when a period carries it in several."""
+    counts = collections.defaultdict(collections.Counter)
+    for h in rows:
+        counts["".join(c for c in h.scheme.lower() if c.isalnum())][h.source] += 1
+    best = {k: max(v, key=v.get) for k, v in counts.items()}
+    return [h for h in rows if best["".join(c for c in h.scheme.lower() if c.isalnum())] == h.source]
+
+
 def cmd_parse(mod, args, s):
     parser = getattr(mod, "parse", parse_file)
     by_period = collections.defaultdict(list)
@@ -118,6 +127,7 @@ def cmd_parse(mod, args, s):
         except Exception as e:
             print(f"FAIL {path}: {e}", file=sys.stderr)
     for period, rows in by_period.items():
+        rows = dedupe(rows)
         if args.check:
             check(period, rows, args.verbose)
             continue
