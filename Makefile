@@ -13,6 +13,10 @@ all: kuvera.csv amfi_funds.csv
 amfi_funds.csv:
 	python src/amc.py
 
+# SSD XMLs live in Git LFS; run git lfs pull first
+schemes.csv: src/ssd.py amfi_funds.csv
+	PYTHONPATH=src uv run python src/ssd.py details .
+
 requirements.txt:
 	uv pip compile pyproject.toml
 # make portfolio AMC=ppfas PERIODS=1 fetches and checks a local sample
