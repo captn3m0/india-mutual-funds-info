@@ -4,6 +4,7 @@ from ..base import Disclosure, parse_period
 
 AMC = "Angel One Mutual Fund"
 SLUG = "angelone"
+IMPERSONATE = "chrome"
 INDEX = "https://www.angelonemf.com/downloads"
 FILE = re.compile(r"https://[^\"'\s<>\\]*?/(monthly[-_ ]portfolio[^\"'\s<>\\/]*\.xlsx?)", re.I)
 

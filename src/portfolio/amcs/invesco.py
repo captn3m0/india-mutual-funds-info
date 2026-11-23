@@ -6,6 +6,7 @@ from ..parse import find_header, parse_sheet, text, workbooks
 
 AMC = "Invesco Mutual Fund"
 SLUG = "invesco"
+IMPERSONATE = "chrome"
 API = "https://www.invescomutualfund.com/api"
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 

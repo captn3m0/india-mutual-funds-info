@@ -7,6 +7,7 @@ from ..base import MONTHS, Disclosure, links, parse_date
 
 AMC = "Bajaj Finserv Mutual Fund"
 SLUG = "bajaj"
+IMPERSONATE = "chrome"
 PAGE = "https://www.bajajamc.com/downloads?statutory-disclosure="
 SECTION = "757"
 
