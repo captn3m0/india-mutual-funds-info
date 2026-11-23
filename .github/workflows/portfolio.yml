@@ -72,16 +72,22 @@ jobs:
     - name: Check for new files
       id: new
       run: echo "found=$([ -d "raw/$SLUG" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-    - name: Restore already archived files for these periods
+    - name: Drop archives in the old one-tar-per-period layout
+      run: |
+        # Those files are refetched because their manifest was removed along with this change
+        if gh release view "raw-$SLUG" --json assets --jq '.assets[].name' 2> /dev/null | grep -q '\.tar$'; then
+          gh release delete "raw-$SLUG" --yes --cleanup-tag
+        fi
+    - name: Restore already archived files for these years
       if: ${{ steps.new.outputs.found == 'true' }}
       run: |
-        # Parsing and archiving replace a whole period, so bring back its earlier files first
+        # Parsing and archiving replace whole periods, so bring back their earlier files first
         archived=$(gh release view "raw-$SLUG" --json assets --jq '.assets[].name' 2> /dev/null || true)
-        for dir in "raw/$SLUG"/*/; do
-          tarball="$SLUG-$(basename "$dir").tar"
+        for year in $(ls "raw/$SLUG" | cut -c1-4 | sort -u); do
+          tarball="$SLUG-$year.tar.gz"
           grep -Fxq -- "$tarball" <<< "$archived" || continue
           gh release download "raw-$SLUG" --pattern "$tarball" --dir "$RUNNER_TEMP/archived"
-          tar -C "raw/$SLUG" --skip-old-files -xf "$RUNNER_TEMP/archived/$tarball"
+          tar -C "raw/$SLUG" --skip-old-files -xzf "$RUNNER_TEMP/archived/$tarball"
         done
     - name: Parse holdings
       if: ${{ steps.new.outputs.found == 'true' }}
@@ -90,13 +96,17 @@ jobs:
       if: ${{ steps.new.outputs.found == 'true' }}
       run: |
         gh release view "raw-$SLUG" > /dev/null 2>&1 || gh release create "raw-$SLUG" --latest=false \
-          --title "Raw disclosures: $SLUG" --notes "Unmodified monthly portfolio files as published by the AMC, one tar per period."
+          --title "Raw disclosures: $SLUG" --notes "Unmodified monthly portfolio files as published by the AMC, one tar.gz per year."
         mkdir -p "$RUNNER_TEMP/tars"
-        for dir in "raw/$SLUG"/*/; do
-          period=$(basename "$dir")
-          tar -C "raw/$SLUG" -cf "$RUNNER_TEMP/tars/$SLUG-$period.tar" "$period"
+        for year in $(ls "raw/$SLUG" | cut -c1-4 | sort -u); do
+          (cd "raw/$SLUG" && tar -czf "$RUNNER_TEMP/tars/$SLUG-$year.tar.gz" "$year"-*)
         done
-        find "$RUNNER_TEMP/tars" -name '*.tar' -print0 | xargs -0 -n 20 gh release upload "raw-$SLUG" --clobber
+        # The workflow token allows 1000 API calls an hour across all jobs, so wait out a refusal
+        for attempt in 1 2 3 4 5 6; do
+          gh release upload "raw-$SLUG" "$RUNNER_TEMP"/tars/*.tar.gz --clobber && exit 0
+          sleep 900
+        done
+        exit 1
     - name: Publish holdings
       if: ${{ steps.new.outputs.found == 'true' }}
       run: |

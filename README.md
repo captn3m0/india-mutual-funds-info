@@ -30,7 +30,7 @@ disclosures that each AMC publishes on its own website. The AMC list comes from 
 - `src/portfolio/amcs/<amc>.py` lists every monthly portfolio file an AMC serves.
 - `portfolio/manifest/<amc>.csv` records each downloaded file (period, URL, sha256).
 - Raw files are not kept in git. The `Portfolio Disclosures` workflow archives them as
-  `raw-<amc>` release assets (one tar per period) and keeps parsed holdings as
+  `raw-<amc>` release assets (one tar.gz per year) and keeps parsed holdings as
   `<amc>.csv.zst` on the `holdings` release.
 - Dated releases carry `portfolio.db.zst`, a SQLite database:
 
