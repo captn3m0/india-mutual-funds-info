@@ -3,13 +3,14 @@ import csv
 import lxml.etree
 import json
 import os
+import sys
 from typing import List, Tuple
 
 
 def generate_amc_ids():
     """Fetch AMC IDs from AMFI website."""
     url = "https://www.amfiindia.com/research-information/other-data/scheme-details"
-    response = requests.get(url)
+    response = requests.get(url, timeout=60)
     response.raise_for_status()
 
     # Find all option values in the HTML content
@@ -40,7 +41,7 @@ def fetch_fund_ids(amc_id: str) -> List[Tuple[str, str]]:
         "ID": amc_id
     }
 
-    response = requests.post(url, headers=headers, data=data)
+    response = requests.post(url, headers=headers, data=data, timeout=60)
     response.raise_for_status()
 
     funds = response.json()
@@ -84,7 +85,8 @@ def main():
     all_data = []
     for amc_id, amc_name in generate_amc_ids():
         for fund_id, fund_name in fetch_fund_ids(amc_id):
-            download_fund_ssd(fund_id, fund_name, amc_name)
+            if "--list" not in sys.argv:
+                download_fund_ssd(fund_id, fund_name, amc_name)
             all_data.append((amc_id, fund_id, fund_name))
 
     write_to_csv(all_data)

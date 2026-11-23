@@ -20,7 +20,10 @@ by label and free text is kept as written.
 - `scheme_isins.csv` maps `mf_id` to every ISIN in the document.
 - `scheme_amfi_codes.csv` maps `mf_id` to the AMFI scheme codes (the ones used in NAV files).
 
-Rebuild with `git lfs pull && make schemes.csv`.
+The `Scheme Details` workflow refreshes these every Sunday: it re-downloads every document
+from AMFI, probes for new scheme IDs, and commits the CSVs. Documents over 200 KB (spreadsheet
+exports) are parsed but not stored, so a local `git lfs pull && make schemes.csv` covers
+fewer schemes than the committed CSVs. `make schemes` does the full download locally.
 
 ## Portfolio Holdings
 

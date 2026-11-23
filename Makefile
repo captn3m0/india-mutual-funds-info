@@ -15,7 +15,12 @@ amfi_funds.csv:
 
 # SSD XMLs live in Git LFS; run git lfs pull first
 schemes.csv: src/ssd.py amfi_funds.csv
-	PYTHONPATH=src uv run python src/ssd.py details .
+	uv run python src/ssd.py details .
+
+# Re-download every SSD from AMFI, then rebuild the CSVs
+schemes:
+	uv run python src/ssd.py fetch
+	uv run python src/ssd.py details .
 
 requirements.txt:
 	uv pip compile pyproject.toml
@@ -23,3 +28,5 @@ requirements.txt:
 portfolio:
 	PYTHONPATH=src uv run python -m portfolio fetch $(AMC) --periods $(or $(PERIODS),1) --no-manifest
 	PYTHONPATH=src uv run python -m portfolio parse $(AMC) --check
+
+.PHONY: all portfolio schemes

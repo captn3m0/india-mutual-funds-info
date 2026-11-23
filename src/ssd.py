@@ -15,6 +15,7 @@ NA = re.compile(r"^(n\.?\s*/?\s*a\.?|nil|none|null|not\s+a(pp?licable|vailable)|
 ISIN = re.compile(r"\bIN[A-Z0-9]{9}\d\b")
 AMFI_CODE = re.compile(r"1[0-5]\d{4}")
 SEBI_CODE = re.compile(r"\b[A-Z0-9&]{2,5}/[OCI]/[A-Z]/[A-Z0-9]{2,4}/\d\d/\d\d/\d{4}\b")
+URL = "https://portal.amfiindia.com/spages/SSD_{}.xml"
 CELLS = {"cell", "table-cell"}
 # canonical field -> pattern over the label with everything but letters and digits removed
 LABELS = {
@@ -172,5 +173,39 @@ def main(src="details", dest="."):
     print(f"{len(schemes)} schemes, {len(isins)} ISINs, {len(codes)} AMFI codes; unparsed: {' '.join(empty) or 'none'}")
 
 
+def fetch(dest="details", lookahead=500):
+    """Refresh every known SSD and probe for new ones; AMFI serves them by MF_ID."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from portfolio.base import session
+
+    with open("amfi_funds.csv", newline="") as f:
+        ids = {int(r["MF_ID"]) for r in csv.DictReader(f)}
+    ids |= {int(os.path.basename(p)[:-4]) for p in glob.glob(f"{dest}/*.xml")}
+    # the fund list can lag behind, so also try the ids just past the newest one
+    ids |= set(range(max(ids) + 1, max(ids) + 1 + lookahead))
+    s = session()
+
+    def one(mf_id):
+        path = f"{dest}/{mf_id}.xml"
+        r = s.get(URL.format(mf_id), timeout=60)
+        if r.status_code == 404 or len(r.content) < 200 or b"<html" in r.content[:500].lower():
+            return ""
+        r.raise_for_status()
+        if os.path.exists(path) and open(path, "rb").read() == r.content:
+            return ""
+        state = "updated" if os.path.exists(path) else "new"
+        with open(path, "wb") as f:
+            f.write(r.content)
+        return state
+
+    with ThreadPoolExecutor(8) as pool:
+        states = list(pool.map(one, sorted(ids)))
+    print(f"checked {len(ids)} ids: {states.count('new')} new, {states.count('updated')} updated")
+
+
 if __name__ == "__main__":
-    main(*sys.argv[1:])
+    if sys.argv[1:2] == ["fetch"]:
+        fetch(*sys.argv[2:])
+    else:
+        main(*sys.argv[1:])

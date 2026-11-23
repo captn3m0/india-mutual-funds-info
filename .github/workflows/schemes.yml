@@ -1,0 +1,39 @@
+name: Scheme Details
+on:
+  schedule:
+    # Sundays 08:00 IST; AMCs revise their scheme summary documents about monthly
+    - cron: '30 2 * * 0'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: schemes
+  cancel-in-progress: false
+jobs:
+  update:
+    name: Update scheme details
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        lfs: true
+    - run: pipx install uv
+    - name: Refresh the AMFI fund list
+      run: timeout 1200 uv run python src/amc.py --list || echo "::warning::could not refresh amfi_funds.csv"
+    - name: Download scheme summary documents
+      run: uv run python src/ssd.py fetch
+    - name: Build scheme CSVs
+      run: uv run python src/ssd.py details .
+    - name: Commit
+      run: |
+        # Spreadsheet exports run to tens of MB; they are parsed above but kept out of LFS
+        find details -name '*.xml' -size +200k -delete
+        git config user.name 'github-actions[bot]'
+        git config user.email 'github-actions[bot]@users.noreply.github.com'
+        git add details amfi_funds.csv schemes.csv scheme_isins.csv scheme_amfi_codes.csv
+        git diff --cached --quiet && exit 0
+        git commit -m "Update scheme details"
+        git pull --rebase origin "$GITHUB_REF_NAME"
+        git push origin "HEAD:$GITHUB_REF_NAME"
