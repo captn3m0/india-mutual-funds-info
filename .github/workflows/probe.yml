@@ -1,0 +1,45 @@
+name: Probe
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - run: pipx install uv
+    - name: Probe blocked sites
+      run: |
+        curl -s https://ipinfo.io/json | grep -E '"(city|country|org)"' || true
+        for h in www.unionmf.com unionmf.com www.bajajamc.com media.bajajamc.com www.invescomutualfund.com invescomutualfund.com; do
+          echo "== $h $(dig +short "$h" | tr '\n' ' ')"
+          curl -sS -o /dev/null -m 20 -w '%{http_code} %{remote_ip} %{time_total}s\n' "https://$h/" 2>&1 | tail -1
+        done
+        uv run python - <<'PY'
+        import sys
+        sys.path.insert(0, "src")
+        from portfolio.base import session
+        urls = [
+            "https://www.bajajamc.com/downloads?statutory-disclosure=",
+            "https://www.bajajamc.com/wp-admin/admin-ajax.php",
+            "https://www.invescomutualfund.com/api/CompleteMonthlyHoldings?year=0",
+            "https://www.invescomutualfund.com/about-us?tab=Statutory&active=CompleteMonthlyHoldings",
+            "https://www.unionmf.com/about-us/downloads/monthly-portfolio",
+            "http://www.unionmf.com/about-us/downloads/monthly-portfolio",
+            "https://unionmf.com/about-us/downloads/monthly-portfolio",
+        ]
+        for imp in (None, "chrome", "safari", "firefox"):
+            s = session(imp)
+            for u in urls:
+                try:
+                    r = s.get(u, timeout=40)
+                    hdr = {k: v for k, v in r.headers.items() if k.lower() in ("server", "content-type", "cf-ray", "x-cache", "via", "set-cookie", "location")}
+                    print(imp, r.status_code, len(r.content), u[:70], str(hdr)[:300])
+                    print("   ", " ".join(r.text[:400].split())[:400])
+                except Exception as e:
+                    print(imp, "ERR", u[:70], repr(e)[:200])
+        PY
