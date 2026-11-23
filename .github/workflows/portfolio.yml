@@ -72,6 +72,17 @@ jobs:
     - name: Check for new files
       id: new
       run: echo "found=$([ -d "raw/$SLUG" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+    - name: Restore already archived files for these periods
+      if: ${{ steps.new.outputs.found == 'true' }}
+      run: |
+        # Parsing and archiving replace a whole period, so bring back its earlier files first
+        archived=$(gh release view "raw-$SLUG" --json assets --jq '.assets[].name' 2> /dev/null || true)
+        for dir in "raw/$SLUG"/*/; do
+          tarball="$SLUG-$(basename "$dir").tar"
+          grep -Fxq -- "$tarball" <<< "$archived" || continue
+          gh release download "raw-$SLUG" --pattern "$tarball" --dir "$RUNNER_TEMP/archived"
+          tar -C "raw/$SLUG" --skip-old-files -xf "$RUNNER_TEMP/archived/$tarball"
+        done
     - name: Parse holdings
       if: ${{ steps.new.outputs.found == 'true' }}
       run: uv run python -m portfolio parse "$SLUG"
