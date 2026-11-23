@@ -1,0 +1,3 @@
+period,filename,url,scheme,sha256,size,fetched
+2026-09,Lakshya_Overnight_Fund_2026-09.xlsx,https://lakshyafunds.com/api/ext/disclosures/portfolio-disclosure/download?scheme_id=A7381286-D615-4096-AF11-0DC02B64BD5B&reporting_month=9&reporting_year=2026,Lakshya Overnight Fund,ade0376a94862a521d349010167fad270613debae2d2682b6c7284235b178f40,260748,2026-11-23
+2026-10,Lakshya_Overnight_Fund_2026-10.xlsx,https://lakshyafunds.com/api/ext/disclosures/portfolio-disclosure/download?scheme_id=A7381286-D615-4096-AF11-0DC02B64BD5B&reporting_month=10&reporting_year=2026,Lakshya Overnight Fund,459cf03a4760a5be4c6f5142e44d483d4f2014ff4d78918c73ed92235c2003a5,260997,2026-11-23
