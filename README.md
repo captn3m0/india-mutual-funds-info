@@ -34,7 +34,8 @@ disclosures that each AMC publishes on its own website. The AMC list comes from 
 - `portfolio/manifest/<amc>.csv` records each downloaded file (period, URL, sha256).
 - Raw files are not kept in git. The `Portfolio Disclosures` workflow archives them as
   `raw-<amc>` release assets (one tar.gz per year) and keeps parsed holdings as
-  `<amc>.csv.zst` on the `holdings` release.
+  `<amc>.csv.zst` on the `holdings` release. Run it with `reparse` ticked to parse the
+  archived files again after a parser change, without fetching anything.
 - Dated releases carry `portfolio.db.zst`, a SQLite database:
 
 ```sql

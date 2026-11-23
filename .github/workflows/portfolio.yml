@@ -11,6 +11,10 @@ on:
       since:
         description: Earliest period to fetch, YYYY-MM
         required: false
+      reparse:
+        description: Parse the archived files again instead of fetching
+        type: boolean
+        default: false
 permissions: {}
 concurrency:
   group: portfolio
@@ -60,37 +64,39 @@ jobs:
     env:
       SLUG: ${{ matrix.slug }}
       GH_TOKEN: ${{ github.token }}
+      REPARSE: ${{ inputs.reparse }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
     - run: pipx install uv
     - name: Download new disclosures
+      if: ${{ !inputs.reparse }}
       env:
         SINCE: ${{ inputs.since }}
       run: uv run python -m portfolio fetch "$SLUG" ${SINCE:+--since "$SINCE"} || echo "::warning::some $SLUG downloads failed"
     - name: Check for new files
       id: new
       run: echo "found=$([ -d "raw/$SLUG" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-    - name: Drop archives in the old one-tar-per-period layout
-      run: |
-        # Those files are refetched because their manifest was removed along with this change
-        if gh release view "raw-$SLUG" --json assets --jq '.assets[].name' 2> /dev/null | grep -q '\.tar$'; then
-          gh release delete "raw-$SLUG" --yes --cleanup-tag
-        fi
-    - name: Restore already archived files for these years
-      if: ${{ steps.new.outputs.found == 'true' }}
+    - name: Restore archived files
+      if: ${{ steps.new.outputs.found == 'true' || inputs.reparse }}
       run: |
         # Parsing and archiving replace whole periods, so bring back their earlier files first
+        mkdir -p "raw/$SLUG"
         archived=$(gh release view "raw-$SLUG" --json assets --jq '.assets[].name' 2> /dev/null || true)
-        for year in $(ls "raw/$SLUG" | cut -c1-4 | sort -u); do
+        [ "$REPARSE" = true ] && years=$(sed -E 's/.*-([0-9]{4})\.tar\.gz$/\1/' <<< "$archived") || years=$(ls "raw/$SLUG" | cut -c1-4 | sort -u)
+        for year in $years; do
           tarball="$SLUG-$year.tar.gz"
           grep -Fxq -- "$tarball" <<< "$archived" || continue
-          gh release download "raw-$SLUG" --pattern "$tarball" --dir "$RUNNER_TEMP/archived"
+          for attempt in 1 2 3 4 5 6; do
+            gh release download "raw-$SLUG" --pattern "$tarball" --dir "$RUNNER_TEMP/archived" && break
+            sleep 900
+          done
           tar -C "raw/$SLUG" --skip-old-files -xzf "$RUNNER_TEMP/archived/$tarball"
+          rm "$RUNNER_TEMP/archived/$tarball"
         done
     - name: Parse holdings
-      if: ${{ steps.new.outputs.found == 'true' }}
+      if: ${{ steps.new.outputs.found == 'true' || inputs.reparse }}
       run: uv run python -m portfolio parse "$SLUG"
     - name: Archive raw files
       if: ${{ steps.new.outputs.found == 'true' }}
@@ -108,10 +114,11 @@ jobs:
         done
         exit 1
     - name: Publish holdings
-      if: ${{ steps.new.outputs.found == 'true' }}
+      if: ${{ steps.new.outputs.found == 'true' || inputs.reparse }}
       run: |
+        [ -d "portfolio/holdings/$SLUG" ] || exit 0
         cd "$RUNNER_TEMP"
-        gh release download holdings --repo "$GITHUB_REPOSITORY" --pattern "$SLUG.csv.zst" || true
+        [ "$REPARSE" = true ] || gh release download holdings --repo "$GITHUB_REPOSITORY" --pattern "$SLUG.csv.zst" || true
         (cd "$GITHUB_WORKSPACE" && uv run python -m portfolio.build merge "$SLUG" "$RUNNER_TEMP/$SLUG.csv.zst" "$RUNNER_TEMP/$SLUG.csv")
         zstd -f -10 -T0 "$SLUG.csv"
         gh release upload holdings --repo "$GITHUB_REPOSITORY" "$SLUG.csv.zst" --clobber
@@ -141,9 +148,9 @@ jobs:
         file_pattern: portfolio/manifest/*.csv
         commit_author: 'github-actions[bot] <github-actions[bot]@users.noreply.github.com>'
     - run: pipx install uv
-      if: ${{ steps.commit.outputs.changes_detected == 'true' }}
+      if: ${{ steps.commit.outputs.changes_detected == 'true' || inputs.reparse }}
     - name: Build and release SQLite dataset
-      if: ${{ steps.commit.outputs.changes_detected == 'true' }}
+      if: ${{ steps.commit.outputs.changes_detected == 'true' || inputs.reparse }}
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
