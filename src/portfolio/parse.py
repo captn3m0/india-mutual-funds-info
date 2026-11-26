@@ -94,7 +94,22 @@ def workbooks(path: str):
 def _open(blob: bytes):
     if XML_NS[1:-1].encode() in blob[:4096]:
         return _XmlWorkbook(blob)
-    return CalamineWorkbook.from_filelike(io.BytesIO(blob))
+    try:
+        return CalamineWorkbook.from_filelike(io.BytesIO(blob))
+    except Exception:
+        if blob[:8] != bytes.fromhex("d0cf11e0a1b11ae1"):
+            raise
+        return CalamineWorkbook.from_filelike(io.BytesIO(_decrypt(blob)))
+
+
+def _decrypt(blob: bytes) -> bytes:
+    """Office files locked with Excel's built-in read-only password."""
+    import msoffcrypto
+
+    f, out = msoffcrypto.OfficeFile(io.BytesIO(blob)), io.BytesIO()
+    f.load_key(password="VelvetSweatshop")
+    f.decrypt(out)
+    return out.getvalue()
 
 
 def _xml_value(cell):
