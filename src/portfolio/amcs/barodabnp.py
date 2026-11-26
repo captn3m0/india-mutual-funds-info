@@ -19,6 +19,11 @@ ITEMS = [
     re.compile(r'<a href="([^"]+)"[^>]*class="excelLink">\s*<div class="left">\s*<span>[^<]*</span>\s*<p>([^<]*)</p>'),
 ]
 DOC = re.compile(r"/view-document/(\d+)$")
+ARCHIVE = SITE + "assetsarchive/baroda_download_documents/"
+MISLINKED = {
+    ARCHIVE + "BMF%20Factsheet%20Apr2020.xls": ARCHIVE + "BMF_Factsheet_Apr2020.xls",
+    ARCHIVE + "Baroda_Factsheet_Nov_2016.xls": ARCHIVE + "Factsheet%20Nov%2716.xls",
+}
 
 
 def hidden(page, name):
@@ -52,6 +57,7 @@ def list_disclosures(session):
     found = {}
     for path, ajax in SOURCES:
         for url, title in items(session, path, ajax):
+            url = MISLINKED.get(url, url)
             if not (is_sheet(url) or DOC.search(url)) or re.search(r"fortnight|mid[- ]?month", title + url, re.I):
                 continue
             period = parse_period(title) or parse_period(url.rsplit("/", 1)[-1])
