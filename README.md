@@ -36,6 +36,10 @@ disclosures that each AMC publishes on its own website. The AMC list comes from 
   `raw-<amc>` release assets (one tar.gz per year) and keeps parsed holdings as
   `<amc>.csv.zst` on the `holdings` release. Run it with `reparse` ticked to parse the
   archived files again after a parser change, without fetching anything.
+- Failed downloads and suspicious months (most files yielding nothing, or scheme names
+  colliding in deduplication) are listed in each run's job summary.
+- Union and WhiteOak fail on GitHub runners and Baroda BNP Paribas does not answer outside
+  India, so their new months need a fetch from an Indian IP.
 - Dated releases carry `portfolio.db.zst`, a SQLite database:
 
 ```sql
@@ -46,6 +50,7 @@ files    (amc, period, filename, url, scheme, sha256, size, fetched)
 ```
 
 Scheme names are as printed in the AMC's sheet; they are not yet mapped to AMFI scheme codes.
+Names that differ only in case or punctuation share one `scheme_id`.
 Hedged schemes (arbitrage, equity savings) legitimately do not sum to 100% of NAV.
 
 To try an AMC locally (downloads a single month into the gitignored `raw/`):

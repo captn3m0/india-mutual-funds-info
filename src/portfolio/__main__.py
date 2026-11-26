@@ -38,17 +38,30 @@ def raw_path(d):
     return f"{RAW}/{d.amc}/{d.period}/{d.filename}"
 
 
-def download(s, d):
+def download(s, d, alt=None):
     r = s.request(d.method, d.url, headers=d.headers, data=d.data, timeout=180)
+    if r.status_code == 403 and alt is not None:
+        r = alt.request(d.method, d.url, headers=d.headers, data=d.data, timeout=180)
     r.raise_for_status()
     body = r.content
     if len(body) < 512 or body.lstrip()[:1] == b"<" and b"<html" in body[:2048].lower():
         raise ValueError(f"not a spreadsheet ({len(body)} bytes)")
+    return body
+
+
+def save(d, body):
     path = raw_path(d)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
         f.write(body)
-    return body
+
+
+def summary(lines):
+    """Append lines to the GitHub Actions job summary, when there is one."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if path and lines:
+        with open(path, "a") as f:
+            f.write("\n".join(lines) + "\n")
 
 
 def select(mod, args, s):
@@ -75,16 +88,22 @@ def cmd_list(mod, args, s):
 
 def cmd_fetch(mod, args, s):
     manifest = {} if args.no_manifest else read_manifest(mod.SLUG)
-    failed = 0
+    follow = getattr(mod, "follow", None)
+    # Some file hosts refuse one client type and accept the other
+    alt = session(None if getattr(mod, "IMPERSONATE", None) else "chrome")
+    failed = []
     for d in select(mod, args, s):
         key = (d.period, d.filename)
         if key in manifest and not args.force:
             continue
         try:
-            body = download(s, d)
+            body = download(s, d, alt)
+            if follow:
+                body = follow(s, d, body)
+            save(d, body)
         except Exception as e:
-            failed += 1
-            print(f"FAIL {d.period} {d.url}: {e}", file=sys.stderr)
+            failed.append(f"FAIL {d.period} {d.url}: {e}")
+            print(failed[-1], file=sys.stderr)
             continue
         manifest[key] = {
             "period": d.period, "filename": d.filename, "url": d.url, "scheme": d.scheme,
@@ -95,6 +114,8 @@ def cmd_fetch(mod, args, s):
         time.sleep(args.delay)
     if not args.no_manifest:
         write_manifest(mod.SLUG, manifest)
+    if failed:
+        summary([f"### {mod.SLUG}: {len(failed)} downloads failed", "```", *failed[:50], "```"])
     return 1 if failed else 0
 
 
@@ -106,18 +127,42 @@ def raw_files(slug):
                 yield period, f"{pdir}/{name}"
 
 
-def dedupe(rows):
-    """Keep one source file per scheme when a period carries it in several."""
+def dedupe(rows, period=""):
+    """Keep one source file per scheme when a period carries it in several, preferring one dated in it."""
     counts = collections.defaultdict(collections.Counter)
+    dated = collections.defaultdict(collections.Counter)
     for h in rows:
-        counts["".join(c for c in h.scheme.lower() if c.isalnum())][h.source] += 1
-    best = {k: max(v, key=v.get) for k, v in counts.items()}
+        key = "".join(c for c in h.scheme.lower() if c.isalnum())
+        counts[key][h.source] += 1
+        dated[key][h.source] += h.as_on[:7] == period
+    best = {k: max(v, key=lambda s: (dated[k][s] > 0, v[s])) for k, v in counts.items()}
     return [h for h in rows if best["".join(c for c in h.scheme.lower() if c.isalnum())] == h.source]
+
+
+def suspicious(slug, period, rows, files):
+    """Warnings for periods whose files mostly give nothing, or share too few scheme names."""
+    used = {h.source.split("!")[0] for h in rows}
+    names = {"".join(c for c in h.scheme.lower() if c.isalnum()) for h in rows}
+    out = []
+    if files >= 5 and len(used) < files / 2:
+        out.append(f"{slug} {period}: only {len(used)} of {files} files gave holdings")
+    if len(used) >= 5 and len(names) < len(used) / 2:
+        out.append(f"{slug} {period}: {len(used)} files share {len(names)} scheme names; names may collide")
+    return out
+
+
+def misfiled(period, rows):
+    """True when every holding is dated after the 1st of the following month."""
+    y, m = map(int, period.split("-"))
+    after = f"{y + m // 12:04d}-{m % 12 + 1:02d}"
+    return bool(rows) and all(h.as_on[:7] == after and h.as_on[8:] != "01" for h in rows)
 
 
 def cmd_parse(mod, args, s):
     parser = getattr(mod, "parse", parse_file)
     by_period = collections.defaultdict(list)
+    files = collections.Counter(period for period, _ in raw_files(mod.SLUG))
+    warnings = []
     for period, path in raw_files(mod.SLUG):
         try:
             rows = parser(path, amc=mod.SLUG, period=period)
@@ -126,8 +171,12 @@ def cmd_parse(mod, args, s):
             by_period[period].extend(rows)
         except Exception as e:
             print(f"FAIL {path}: {e}", file=sys.stderr)
-    for period, rows in by_period.items():
-        rows = dedupe(rows)
+    for period, parsed in by_period.items():
+        rows = dedupe(parsed, period)
+        warnings += suspicious(mod.SLUG, period, parsed, files[period])
+        if misfiled(period, rows):
+            warnings.append(f"{mod.SLUG} {period}: every holding is dated {rows[0].as_on}; dropped as next month's data")
+            rows = []
         if args.check:
             check(period, rows, args.verbose)
             continue
@@ -137,6 +186,10 @@ def cmd_parse(mod, args, s):
             w.writerow(FIELDS)
             w.writerows(h.row() for h in rows)
         print(f"{mod.SLUG} {period}: {len(rows)} holdings")
+    for line in warnings:
+        print(f"WARN {line}", file=sys.stderr)
+    if warnings:
+        summary([f"### {mod.SLUG}: {len(warnings)} parse warnings", *[f"- {w}" for w in warnings]])
 
 
 def check(period, rows, verbose):
