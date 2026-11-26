@@ -2,6 +2,7 @@ import csv
 import glob
 import io
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -61,19 +62,25 @@ def number(v):
     return float(v) if v != "" else None
 
 
+def scheme_key(amc, name):
+    return amc, " ".join(re.findall(r"[a-z0-9]+", name.lower()))
+
+
 def db(out, inputs):
     """Build the SQLite dataset from per-AMC holdings CSVs and the manifests."""
     if os.path.exists(out):
         os.remove(out)
     conn = sqlite3.connect(out)
     conn.executescript(SCHEMA)
-    schemes = {}
+    schemes, names = {}, {}
     for path in inputs:
         batch = []
         for r in read_rows(path):
-            key = (r["amc"], r["scheme"])
+            # Case and punctuation changes in a printed name keep the same scheme_id
+            key = scheme_key(r["amc"], r["scheme"])
             if key not in schemes:
                 schemes[key] = len(schemes) + 1
+                names[key] = r["scheme"]
             batch.append((
                 schemes[key], r["period"], r["as_on"], r["section"], r["subsection"], r["name"],
                 r["isin"] or None, r["industry_rating"], number(r["quantity"]),
@@ -81,7 +88,7 @@ def db(out, inputs):
             ))
         conn.executemany("INSERT INTO holdings VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", batch)
         print(f"{path}: {len(batch)} holdings")
-    conn.executemany("INSERT INTO schemes VALUES (?,?,?)", [(i, a, n) for (a, n), i in schemes.items()])
+    conn.executemany("INSERT INTO schemes VALUES (?,?,?)", [(i, k[0], names[k]) for k, i in schemes.items()])
     for path in sorted(glob.glob(f"{MANIFEST}/*.csv")):
         amc = os.path.basename(path)[:-4]
         with open(path, newline="") as f:
