@@ -1,12 +1,14 @@
 import re
 import time
+from urllib.parse import urljoin
 
 from ..base import Disclosure
 from ..parse import find_header, parse_sheet, text, workbooks
 
 AMC = "Invesco Mutual Fund"
 SLUG = "invesco"
-API = "https://www.invescomutualfund.com/api"
+SITE = "https://www.invescomutualfund.com/"
+API = SITE + "api"
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
@@ -28,6 +30,7 @@ def list_disclosures(session):
                     if not url or url in seen or "sample-file" in url:
                         continue
                     seen.add(url)
+                    url = urljoin(SITE, url)
                     ext = re.search(r"\.(xlsx?|zip)(?:\?|$)", url, re.I)
                     slug = re.sub(r"[^A-Za-z0-9]+", "_", row["Name"]).strip("_")
                     stem = re.sub(r"[^A-Za-z0-9]+", "_", url.split("?")[0].rsplit("/", 1)[-1].rsplit(".", 1)[0])[-40:]

@@ -1,8 +1,12 @@
+import io
 import re
 import time
+from urllib.parse import quote
+
+from python_calamine import CalamineWorkbook
 
 from ..base import Disclosure
-from ..parse import parse_sheet, workbooks
+from ..parse import parse_sheet, text, workbooks
 
 AMC = "HDFC Mutual Fund"
 SLUG = "hdfc"
@@ -33,6 +37,21 @@ def list_disclosures(session):
                 seen.add(name)
                 period = f"{int(year):04d}-{int(month):02d}"
                 yield Disclosure(amc=SLUG, period=period, url=url, filename=name, scheme=name.rsplit(".", 1)[0])
+
+
+def follow(session, d, body):
+    """Sep 2021 to Sep 2022 debt funds were published as a sheet linking to the real file."""
+    if len(body) > 20000 or body[:2] != b"PK":
+        return body
+    wb = CalamineWorkbook.from_filelike(io.BytesIO(body))
+    rows = wb.get_sheet_by_name(wb.sheet_names[0]).to_python(skip_empty_area=False)
+    url = next((t for r in rows if "Monthly" in map(text, r) for t in map(text, r) if t.startswith("http")), None)
+    if not url:
+        return body
+    r = session.get(quote(url, safe=":/%"), headers=HEADERS, timeout=180)
+    if r.status_code != 200 or r.content[:2] != b"PK":
+        raise ValueError(f"linked file {url} gave HTTP {r.status_code}")
+    return r.content
 
 
 def parse(path, amc="", period=""):

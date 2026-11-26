@@ -1,18 +1,45 @@
 import re
+from collections import Counter
 
 from ..base import MONTHS, Disclosure, parse_date, parse_period
 from ..parse import SCHEME_HINT, Holding, find_header, num, parse_sheet, text, workbooks
 
 AMC = "Bandhan Mutual Fund"
 SLUG = "bandhan"
-API = "https://cmsnew.bandhanmutual.com/wp-json/finance-api/v1/posts/monthly-portfolio?bypass_pagination=true"
+BASE = "https://cmsnew.bandhanmutual.com/wp-json/finance-api/v1/posts"
+
+
+def _posts(session, category):
+    r = session.get(f"{BASE}/{category}?bypass_pagination=true", timeout=600)
+    r.raise_for_status()
+    return r.json()["data"]
+
+
+def _scheme_files(session):
+    """Complete per-scheme month-end files, Sep 2021 to Dec 2024."""
+    for post in _posts(session, "scheme-portfolios"):
+        if not post["title"].lower().startswith("monthly and half"):
+            continue
+        for f in post["acf_fields"].get("disclosure_files") or []:
+            link, name = f.get("document_link"), f.get("document_name") or ""
+            period = parse_period(name)
+            if not link or not link.get("url") or not period or not "2021-09" <= period <= "2024-12":
+                continue
+            fp = parse_period(link["filename"])
+            if fp == period or (fp is None and period[:4] in link["filename"]):
+                yield Disclosure(amc=SLUG, period=period, url=link["url"], scheme=name)
 
 
 def list_disclosures(session):
-    r = session.get(API, timeout=120)
-    r.raise_for_status()
+    full = list(_scheme_files(session))
+    counts = Counter(d.period for d in full)
+    covered = {p for p, n in counts.items() if n >= 30}
     seen = set()
-    for post in r.json()["data"]:
+    for d in full:
+        if d.period in covered and d.url not in seen:
+            seen.add(d.url)
+            yield d
+    for post in _posts(session, "monthly-portfolio"):
         year = post["acf_fields"].get("financial_year") or ""
         for f in post["acf_fields"].get("disclosure_files") or []:
             link = f.get("document_link")
@@ -23,7 +50,7 @@ def list_disclosures(session):
             period = parse_period(link["filename"]) or parse_period(name)
             if not period and f.get("month") and year.isdigit():
                 period = f"{year}-{MONTHS[f['month'].lower()]:02d}"
-            if period:
+            if period and period not in covered:
                 yield Disclosure(amc=SLUG, period=period, url=link["url"], scheme=name)
 
 

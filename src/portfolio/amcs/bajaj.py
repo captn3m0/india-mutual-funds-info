@@ -14,7 +14,10 @@ SECTION = "757"
 
 def list_disclosures(session):
     page = session.get(PAGE, timeout=60).text
-    cfg = json.loads(re.search(r"var bajajDownloads = (\{.*?\});", page).group(1))
+    m = re.search(r"var bajajDownloads = (\{.*?\});", page)
+    if not m:
+        raise RuntimeError(f"downloads page has no bajajDownloads config ({len(page)} bytes, likely blocked)")
+    cfg = json.loads(m.group(1))
 
     def call(**data):
         r = session.post(cfg["ajaxUrl"], data={"nonce": cfg["nonce"], **data}, timeout=60)

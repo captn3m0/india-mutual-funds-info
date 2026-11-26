@@ -23,6 +23,8 @@ def list_disclosures(session):
                 continue
             seen.add(path)
             name = path.rsplit("/", 1)[-1]
-            period = parse_period(title) or parse_period(name)
+            # Titles are sometimes a month off; the factsheet name carries the real date
+            dated = re.search(r"_\d\d-(\d\d)-(?:20)?(\d\d)_", name)
+            period = f"20{dated[2]}-{dated[1]}" if dated else parse_period(title) or parse_period(name)
             if period:
                 yield Disclosure(amc=SLUG, period=period, url=BASE + quote(path))
