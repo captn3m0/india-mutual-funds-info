@@ -1,7 +1,7 @@
 import re
 
 from ..base import Disclosure, is_sheet, parse_date, parse_period
-from ..parse import find_header, parse_sheet, text, workbooks
+from ..parse import find_header, parse_sheet, text, unhedge, workbooks
 
 AMC = "Kotak Mahindra Mutual Fund"
 SLUG = "kotak"
@@ -68,9 +68,10 @@ def titled(rows):
 
 
 def holding(h):
-    """False for derivative disclosure tables, numbered notes and footnote-only subtotal rows."""
+    """False for derivative tables, notes and footnote-only rows; a lone row equal to the total is dropped later."""
     section = h.section.strip()
-    return not (section.lower().startswith("underlying") or re.fullmatch(r"\d+\.?", section)
+    return not (re.match(r"underlying|notes?\b", section, re.I) or re.match(r"notes?\s*:", h.name, re.I)
+                or re.fullmatch(r"\d+\.?", section)
                 or not re.search(r"[A-Za-z0-9]", h.name))
 
 
@@ -82,6 +83,10 @@ def parse(path, amc="", period=""):
             rows = realign(wb.get_sheet_by_name(sheet).to_python(skip_empty_area=False))
             if not titled(rows) and re.search(r"note|common|yield", sheet, re.I):
                 continue
-            hs = parse_sheet(rows, sheet, amc=amc, period=period, source=source)
-            out.extend(h for h in hs if holding(h))
+            hs = [h for h in parse_sheet(rows, sheet, amc=amc, period=period, source=source) if holding(h)]
+            total = sum(h.pct_nav or 0 for h in hs)
+            stray = [h for h in hs if not h.isin and h.pct_nav and 98 <= total - h.pct_nav <= 102]
+            if not 95 <= total <= 105 and len(stray) == 1:
+                hs.remove(stray[0])
+            out.extend(unhedge(hs))
     return out

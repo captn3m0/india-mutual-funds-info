@@ -2,6 +2,7 @@ import re
 import time
 
 from ..base import MONTHS, Disclosure
+from ..parse import find_header, parse_sheet, text, workbooks
 
 AMC = "Axis Mutual Fund"
 SLUG = "axis"
@@ -55,3 +56,20 @@ def list_disclosures(session):
                 if d["docuementURL"] not in seen:
                     seen.add(d["docuementURL"])
                     yield disclosure(d, period)
+
+
+def parse(path, amc="", period=""):
+    """Generic parsing, except Aug 2017 labels % to NAV as a second market value column."""
+    out = []
+    for member, wb in workbooks(path):
+        source = path.rsplit("/", 1)[-1] + (f"!{member}" if member else "")
+        for sheet in wb.sheet_names:
+            rows = [list(r) for r in wb.get_sheet_by_name(sheet).to_python(skip_empty_area=False)]
+            hi = find_header(rows)
+            if hi is not None:
+                head = [text(c).lower() for c in rows[hi]]
+                market = [j for j, c in enumerate(head) if c.startswith("market")]
+                if len(market) == 2 and not any("%" in c or "net assets" in c for c in head):
+                    rows[hi][market[1]] = "% to Net Assets"
+            out.extend(parse_sheet(rows, sheet, amc=amc, period=period, source=source))
+    return out

@@ -16,7 +16,7 @@ SITE = "https://www.edelweissmf.com"
 API = "https://api.edelweissmf.com/edelweissmf/api/v1/"
 HEADERS = {"Origin": SITE, "Referer": SITE + "/"}
 EXTRAS = re.compile(r"allocation|detailed investment", re.I)
-SUBTOTAL = re.compile(r"(equity & equity related|debt instruments|money market instruments|others)$", re.I)
+SUBTOTAL = re.compile(r"(equity & equity related|debt instruments|money market instruments?|others)$", re.I)
 REVERSED = re.compile(r"derivatives\s*\(\s*reversed positions\s*\)", re.I)
 
 
@@ -89,14 +89,26 @@ def parse(path, amc="", period=""):
         source = path.rsplit("/", 1)[-1] + (f"!{member}" if member else "")
         names = funds(wb)
         for sheet in wb.sheet_names:
+            if re.fullmatch(r"sheet\d+", sheet, re.I) and len(wb.sheet_names) > 2:
+                continue
             rows = wb.get_sheet_by_name(sheet).to_python(skip_empty_area=False)
             hs = parse_sheet(rows, sheet, amc=amc, period=period, source=source)
             # Pre-2013 sheets carry section subtotals as rows, and the title in the first cell
             hs = [h for h in hs if h.isin or h.quantity or not (SUBTOTAL.match(h.name) or REVERSED.match(h.name))]
-            title = next((text(c) for c in rows[0] if text(c)), "") if rows else ""
+            seen, unique = set(), []
             for h in hs:
-                if sheet in names:
+                key = (h.isin, h.quantity, h.market_value_lakh, h.pct_nav)
+                if not (h.isin and key in seen):
+                    seen.add(key)
+                    unique.append(h)
+            hs = unique
+            title = next((text(c) for c in rows[0] if text(c)), "") if rows else ""
+            stated = re.match(r"portfolio statement of\s+(.+?)(?:\s+(?:as on|for the)\b.*)?$", title, re.I)
+            for h in hs:
+                if names.get(sheet):
                     h.scheme = names[sheet]
+                elif stated:
+                    h.scheme = stated[1].strip(" ()")
                 elif re.match(r"edelweiss|e\.d\.g\.e", title, re.I):
                     h.scheme = title.rstrip(".*# ")
             pcts = [h.pct_nav for h in hs if h.pct_nav is not None]
