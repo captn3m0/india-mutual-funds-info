@@ -40,7 +40,7 @@ def list_disclosures(session):
 
 
 def follow(session, d, body):
-    """Sep 2021 to Sep 2022 debt funds were published as a sheet linking to the real file."""
+    """Sep 2021 to Sep 2022 debt funds were linked sheets; a target S3 no longer has keeps the sheet."""
     if len(body) > 20000 or body[:2] != b"PK":
         return body
     wb = CalamineWorkbook.from_filelike(io.BytesIO(body))
@@ -49,9 +49,11 @@ def follow(session, d, body):
     if not url:
         return body
     r = session.get(quote(url, safe=":/%"), headers=HEADERS, timeout=180)
-    if r.status_code != 200 or r.content[:2] != b"PK":
-        raise ValueError(f"linked file {url} gave HTTP {r.status_code}")
-    return r.content
+    if r.status_code == 200 and r.content[:2] == b"PK":
+        return r.content
+    if b"<Code>AccessDenied</Code>" in r.content[:300]:
+        return body
+    raise ValueError(f"linked file {url} gave HTTP {r.status_code}")
 
 
 def parse(path, amc="", period=""):
