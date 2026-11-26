@@ -15,20 +15,21 @@ FIELDS = [
 
 ISIN_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}\d$")
 SHEET_EXT = (".xls", ".xlsx", ".xlsb", ".xlsm", ".ods")
+XML_NS = "{urn:schemas-microsoft-com:office:spreadsheet}"
 
 COLUMNS = {
     "isin": r"^isin",
     "name": r"name of|instrument|issuer|security|company|particulars|scrip",
     "industry_rating": r"industry|rating|sector",
     "quantity": r"quantity|qty|no\.? of|units|shares",
-    "market_value": r"market|fair value|value|amount",
+    "market_value": r"market|mkt\.? ?val|fair value|value|amount",
     "pct_nav": r"%|percent",
     "ytm": r"yield|ytm|ytc",
 }
 TOTAL_RE = re.compile(r"^(sub[\s_-]*totals?|totals?|grand[\s_]total|net assets?|net asset value)\b", re.I)
 END_RE = re.compile(r"^(grand[\s_]total|net assets?|total net assets?|total aum)\b", re.I)
 SUBSECTION_RE = re.compile(r"^\(?([a-z]|[ivx]{1,4}|\d{1,2})[).]\s", re.I)
-FUT_RE = re.compile(r"\bfut|\bfutures?\b|\bderivat|#$", re.I)
+FUT_RE = re.compile(r"\bfut|\bfutures?\b|\bderivat|\birs\b|interest rate swap|#$", re.I)
 SCHEME_HINT = re.compile(r"fund|scheme|etf|plan|index|fof|yojana|bees", re.I)
 
 
@@ -85,16 +86,69 @@ def workbooks(path: str):
     with open(path, "rb") as f:
         blob = f.read()
     if blob[:2] == b"PK" and not _is_ooxml(blob):
-        with zipfile.ZipFile(io.BytesIO(blob)) as z:
-            for n in z.namelist():
-                if n.lower().endswith(SHEET_EXT) and not n.split("/")[-1].startswith("~"):
-                    try:
-                        wb = CalamineWorkbook.from_filelike(io.BytesIO(z.read(n)))
-                    except Exception:
-                        continue
-                    yield n, wb
+        yield from _members(blob, "")
     else:
-        yield "", CalamineWorkbook.from_filelike(io.BytesIO(blob))
+        yield "", _open(blob)
+
+
+def _open(blob: bytes):
+    if XML_NS[1:-1].encode() in blob[:4096]:
+        return _XmlWorkbook(blob)
+    return CalamineWorkbook.from_filelike(io.BytesIO(blob))
+
+
+def _xml_value(cell):
+    data = cell.find(f"{XML_NS}Data")
+    if data is None:
+        return ""
+    t, v = data.get(f"{XML_NS}Type"), "".join(data.itertext())
+    if t == "Number":
+        return float(v)
+    if t == "DateTime":
+        return datetime.datetime.fromisoformat(v[:19])
+    return v
+
+
+class _XmlWorkbook:
+    """Excel 2003 XML (SpreadsheetML) files, which calamine cannot read, with the same interface."""
+
+    def __init__(self, blob: bytes):
+        import xml.etree.ElementTree as ET
+
+        self.sheets = {}
+        for ws in ET.fromstring(blob).iter(f"{XML_NS}Worksheet"):
+            rows = []
+            for row in ws.iter(f"{XML_NS}Row"):
+                rows += [[] for _ in range(int(row.get(f"{XML_NS}Index", len(rows) + 1)) - 1 - len(rows))]
+                cells = []
+                for c in row.findall(f"{XML_NS}Cell"):
+                    cells += [""] * (int(c.get(f"{XML_NS}Index", len(cells) + 1)) - 1 - len(cells))
+                    cells += [_xml_value(c)] + [""] * int(c.get(f"{XML_NS}MergeAcross", 0))
+                rows.append(cells)
+            width = max(map(len, rows), default=0)
+            self.sheets[ws.get(f"{XML_NS}Name")] = [r + [""] * (width - len(r)) for r in rows]
+        self.sheet_names = list(self.sheets)
+
+    def get_sheet_by_name(self, name):
+        rows = self.sheets[name]
+        return type("Sheet", (), {"to_python": lambda self, skip_empty_area=False: rows})()
+
+
+def _members(blob: bytes, prefix: str):
+    """Workbooks inside a zip, including zips nested in it."""
+    with zipfile.ZipFile(io.BytesIO(blob)) as z:
+        for n in z.namelist():
+            base = n.split("/")[-1]
+            if base.startswith(("~", "._")) or n.startswith("__MACOSX/"):
+                continue
+            if n.lower().endswith(".zip"):
+                yield from _members(z.read(n), f"{prefix}{n}!")
+            elif n.lower().endswith(SHEET_EXT):
+                try:
+                    wb = _open(z.read(n))
+                except Exception:
+                    continue
+                yield prefix + n, wb
 
 
 def _is_ooxml(blob: bytes) -> bool:
@@ -155,7 +209,7 @@ def find_meta(rows, hi, sheet_name):
             m = re.match(r"(?:scheme name|name of the scheme|scheme)\s*[:\-]\s*(.*)", t, re.I)
             if m and not scheme:
                 scheme = m.group(1).strip() or (text(cells[k + 1]) if k + 1 < len(cells) else "")
-            elif SCHEME_HINT.search(t) and not re.search(r"mutual fund$|^portfolio|back to|pursuant to|regulation", t, re.I):
+            elif SCHEME_HINT.search(t) and not re.search(r"mutual fund$|registration no|investment manager|^portfolio|back to|pursuant to|regulation", t, re.I):
                 candidates.append(t)
     if not scheme and candidates:
         scheme = candidates[0]
