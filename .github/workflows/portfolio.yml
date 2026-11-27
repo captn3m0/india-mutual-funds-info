@@ -39,7 +39,8 @@ jobs:
       env:
         AMC: ${{ inputs.amc }}
       run: |
-        all=$(uv run python -m portfolio amcs | cut -f1)
+        all=$(uv run python -m portfolio amcs)
+        all=$(cut -f1 <<< "$all")
         picked=$(for s in ${AMC:-$all}; do grep -Fx -- "$s" <<< "$all" || echo "::warning::unknown AMC $s" >&2; done)
         echo "slugs=$(jq -Rnc '[inputs | select(length > 0)]' <<< "$picked")" >> "$GITHUB_OUTPUT"
     - name: Ensure holdings release

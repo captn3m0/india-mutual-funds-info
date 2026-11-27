@@ -12,3 +12,6 @@ dependencies = [
     "python-calamine>=0.9.1",
     "requests>=2.32.3",
 ]
+
+[tool.uv]
+no-build = true
