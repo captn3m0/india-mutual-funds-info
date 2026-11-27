@@ -53,7 +53,7 @@ jobs:
     name: Fetch ${{ matrix.slug }}
     needs: plan
     if: ${{ needs.plan.outputs.slugs != '[]' }}
-    runs-on: ${{ !inputs.reparse && contains(fromJSON('["bajaj","barodabnp","union","whiteoak"]'), matrix.slug) && 'blr1-srv' || 'ubuntu-latest' }}
+    runs-on: ${{ !inputs.reparse && contains(fromJSON('["bajaj","barodabnp","edelweiss","navi","union","whiteoak"]'), matrix.slug) && 'blr1-srv' || 'ubuntu-latest' }}
     timeout-minutes: 350
     permissions:
       contents: write

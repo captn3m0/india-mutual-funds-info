@@ -38,8 +38,8 @@ disclosures that each AMC publishes on its own website. The AMC list comes from 
   archived files again after a parser change, without fetching anything.
 - Failed downloads and suspicious months (most files yielding nothing, or scheme names
   colliding in deduplication) are listed in each run's job summary.
-- Union, WhiteOak and Baroda BNP Paribas refuse GitHub's IPs and Bajaj often does, so
-  their fetch jobs run on a self-hosted arm64 runner in India labelled `blr1-srv`.
+- Union, WhiteOak, Edelweiss, Navi and Baroda BNP Paribas refuse GitHub's IPs and Bajaj
+  often does, so their fetch jobs run on a self-hosted arm64 runner labelled `blr1-srv`.
 - Dated releases carry `portfolio.db.zst`, a SQLite database:
 
 ```sql
