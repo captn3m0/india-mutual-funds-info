@@ -71,8 +71,9 @@ jobs:
         persist-credentials: false
     - name: Install uv
       run: |
+        if command -v pipx > /dev/null; then pipx install uv; exit 0; fi
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-        if command -v uv > /dev/null || [ -x "$HOME/.local/bin/uv" ]; then exit 0; fi
+        if [ -x "$HOME/.local/bin/uv" ]; then exit 0; fi
         tarball="uv-$(uname -m)-unknown-linux-gnu.tar.gz"
         gh release download --repo astral-sh/uv --pattern "$tarball*" --dir "$RUNNER_TEMP/uv"
         (cd "$RUNNER_TEMP/uv" && sha256sum -c "$tarball.sha256")
