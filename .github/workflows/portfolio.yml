@@ -52,7 +52,7 @@ jobs:
     name: Fetch ${{ matrix.slug }}
     needs: plan
     if: ${{ needs.plan.outputs.slugs != '[]' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ !inputs.reparse && contains(fromJSON('["bajaj","barodabnp","union","whiteoak"]'), matrix.slug) && 'blr1-srv' || 'ubuntu-latest' }}
     timeout-minutes: 350
     permissions:
       contents: write
@@ -69,7 +69,15 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
-    - run: pipx install uv
+    - name: Install uv
+      run: |
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        if command -v uv > /dev/null || [ -x "$HOME/.local/bin/uv" ]; then exit 0; fi
+        tarball="uv-$(uname -m)-unknown-linux-gnu.tar.gz"
+        gh release download --repo astral-sh/uv --pattern "$tarball*" --dir "$RUNNER_TEMP/uv"
+        (cd "$RUNNER_TEMP/uv" && sha256sum -c "$tarball.sha256")
+        mkdir -p "$HOME/.local/bin"
+        tar -C "$HOME/.local/bin" --strip-components 1 -xzf "$RUNNER_TEMP/uv/$tarball"
     - name: Download new disclosures
       if: ${{ !inputs.reparse }}
       env:
